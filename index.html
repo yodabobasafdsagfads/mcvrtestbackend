@@ -156,43 +156,43 @@
     <canvas id="gameCanvas"></canvas>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
-        // Backend Server Integration
-        const API_KEY = 'sk_test_x1y2z3a4b5c6d7e8f9g0h1i2j3k4l5m6';
-        const SERVER_URL = window.location.origin;
+        // Shared Local Storage Backend
+        const STORAGE_KEY = 'spaceShooter_serverData';
 
-        async function apiRequest(endpoint, method = 'GET', data = null) {
-            const options = {
-                method,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-API-Key': API_KEY
-                }
-            };
-            if (data) {
-                options.body = JSON.stringify(data);
-            }
-            try {
-                const response = await fetch(SERVER_URL + endpoint, options);
-                return await response.json();
-            } catch (error) {
-                console.error('API Error:', error);
-                return null;
-            }
+        function getServerData() {
+            const data = localStorage.getItem(STORAGE_KEY);
+            return data ? JSON.parse(data) : { scores: [] };
         }
 
+        function saveServerData(data) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        }
+
+        // Submit game score
         async function submitScore(playerName, score) {
-            const result = await apiRequest('/api/game/score', 'POST', {
+            const serverData = getServerData();
+            const newScore = {
+                id: Date.now(),
                 player: playerName,
-                score: score
-            });
-            console.log('Score submitted:', result);
-            return result;
+                score: score,
+                timestamp: Date.now()
+            };
+            
+            serverData.scores.push(newScore);
+            serverData.scores.sort((a, b) => b.score - a.score);
+            saveServerData(serverData);
+            
+            console.log('Score submitted:', newScore);
+            return { success: true, score: newScore, rank: serverData.scores.indexOf(newScore) + 1 };
         }
 
+        // Get leaderboard
         async function getLeaderboard() {
-            const result = await apiRequest('/api/game/leaderboard');
-            console.log('Leaderboard:', result);
-            return result;
+            const serverData = getServerData();
+            return { 
+                scores: serverData.scores.slice(0, 10),
+                total: serverData.scores.length 
+            };
         }
 
         // Game variables
@@ -449,7 +449,7 @@
             
             if (data && data.scores && data.scores.length > 0) {
                 leaderboardDiv.innerHTML = '<h2>🏆 Leaderboard 🏆</h2>';
-                data.scores.slice(0, 10).forEach((entry, index) => {
+                data.scores.forEach((entry, index) => {
                     const div = document.createElement('div');
                     div.className = 'leaderboard-entry';
                     div.textContent = `${index + 1}. ${entry.player}: ${entry.score}`;

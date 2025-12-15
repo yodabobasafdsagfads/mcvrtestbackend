@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Space Shooter 3D</title>
+    <title>Space Shooter 3D - Global Edition</title>
     <style>
         * {
             margin: 0;
@@ -78,6 +78,11 @@
             margin-bottom: 20px;
             text-shadow: 0 0 20px #00ffff;
         }
+        .subtitle {
+            font-size: 16px;
+            color: #0af;
+            margin-bottom: 20px;
+        }
         button {
             font-size: 24px;
             padding: 15px 40px;
@@ -107,18 +112,34 @@
             margin-top: 20px;
             max-height: 300px;
             overflow-y: auto;
+            width: 500px;
         }
         .leaderboard-entry {
             padding: 10px;
             margin: 5px 0;
             background: rgba(0, 255, 255, 0.1);
             border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .leaderboard-entry.top3 {
+            background: rgba(255, 215, 0, 0.2);
+            border: 1px solid gold;
         }
         #instructions {
             margin-top: 20px;
             font-size: 16px;
             text-align: center;
             line-height: 1.6;
+        }
+        .loading {
+            color: #0af;
+            font-style: italic;
+        }
+        #globalStats {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #888;
         }
     </style>
 </head>
@@ -132,6 +153,7 @@
 
     <div id="menu">
         <h1>🚀 SPACE SHOOTER 3D 🚀</h1>
+        <div class="subtitle">🌍 GLOBAL EDITION - Compete with players worldwide!</div>
         <div id="instructions">
             <p><strong>W/S</strong> - Move Forward/Backward</p>
             <p><strong>A/D</strong> - Move Left/Right</p>
@@ -141,6 +163,7 @@
         </div>
         <input type="text" id="playerName" placeholder="Enter your name" maxlength="20" value="Player">
         <button id="startBtn">START GAME</button>
+        <div id="globalStats"></div>
         <div id="leaderboard"></div>
     </div>
 
@@ -149,6 +172,9 @@
         <div style="font-size: 32px; margin: 20px 0;">
             Final Score: <span id="finalScore">0</span>
         </div>
+        <div style="font-size: 18px; margin: 10px 0; color: #0af;">
+            Global Rank: <span id="globalRank">-</span>
+        </div>
         <button id="restartBtn">PLAY AGAIN</button>
         <button id="menuBtn">MAIN MENU</button>
     </div>
@@ -156,21 +182,40 @@
     <canvas id="gameCanvas"></canvas>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
-        // Shared Local Storage Backend
-        const STORAGE_KEY = 'spaceShooter_serverData';
+        // Global Backend Server Integration
+        const GLOBAL_STORAGE_KEY = 'global_backend_server_v3';
 
-        function getServerData() {
-            const data = localStorage.getItem(STORAGE_KEY);
-            return data ? JSON.parse(data) : { scores: [] };
+        // Get global data (shared across ALL users)
+        async function getGlobalData() {
+            try {
+                const data = await window.storage.get(GLOBAL_STORAGE_KEY, true);
+                return data ? JSON.parse(data.value) : {
+                    scores: [],
+                    analytics: { totalPlayers: 0, totalGames: 0, highestScore: 0, lastUpdated: Date.now() }
+                };
+            } catch (error) {
+                console.log('Initializing global database');
+                return {
+                    scores: [],
+                    analytics: { totalPlayers: 0, totalGames: 0, highestScore: 0, lastUpdated: Date.now() }
+                };
+            }
         }
 
-        function saveServerData(data) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        // Save global data
+        async function saveGlobalData(data) {
+            try {
+                await window.storage.set(GLOBAL_STORAGE_KEY, JSON.stringify(data), true);
+                return true;
+            } catch (error) {
+                console.error('Failed to save to global database:', error);
+                return false;
+            }
         }
 
-        // Submit game score
+        // Submit score to global leaderboard
         async function submitScore(playerName, score) {
-            const serverData = getServerData();
+            const db = await getGlobalData();
             const newScore = {
                 id: Date.now(),
                 player: playerName,
@@ -178,20 +223,32 @@
                 timestamp: Date.now()
             };
             
-            serverData.scores.push(newScore);
-            serverData.scores.sort((a, b) => b.score - a.score);
-            saveServerData(serverData);
+            // Track unique players
+            const uniquePlayers = new Set(db.scores.map(s => s.player));
+            if (!uniquePlayers.has(playerName)) {
+                db.analytics.totalPlayers++;
+            }
             
-            console.log('Score submitted:', newScore);
-            return { success: true, score: newScore, rank: serverData.scores.indexOf(newScore) + 1 };
+            db.scores.push(newScore);
+            db.scores.sort((a, b) => b.score - a.score);
+            db.analytics.totalGames++;
+            db.analytics.highestScore = Math.max(db.analytics.highestScore || 0, score);
+            db.analytics.lastUpdated = Date.now();
+            
+            await saveGlobalData(db);
+            
+            const rank = db.scores.findIndex(s => s.id === newScore.id) + 1;
+            console.log('Score submitted to global leaderboard:', newScore, 'Rank:', rank);
+            return { success: true, score: newScore, rank: rank };
         }
 
-        // Get leaderboard
+        // Get global leaderboard
         async function getLeaderboard() {
-            const serverData = getServerData();
+            const db = await getGlobalData();
             return { 
-                scores: serverData.scores.slice(0, 10),
-                total: serverData.scores.length 
+                scores: db.scores.slice(0, 10),
+                total: db.scores.length,
+                analytics: db.analytics
             };
         }
 
@@ -425,11 +482,15 @@
             bullets = [];
         }
 
-        function endGame() {
+        async function endGame() {
             gameActive = false;
             document.getElementById('finalScore').textContent = score;
             document.getElementById('gameOver').style.display = 'flex';
-            submitScore(playerName, score);
+            
+            const result = await submitScore(playerName, score);
+            if (result.success) {
+                document.getElementById('globalRank').textContent = `#${result.rank} / ${(await getLeaderboard()).total}`;
+            }
         }
 
         function restartGame() {
@@ -444,19 +505,36 @@
         }
 
         async function loadLeaderboard() {
-            const data = await getLeaderboard();
             const leaderboardDiv = document.getElementById('leaderboard');
+            const statsDiv = document.getElementById('globalStats');
+            leaderboardDiv.innerHTML = '<div class="loading">🌍 Loading global leaderboard...</div>';
+            
+            const data = await getLeaderboard();
+            
+            // Show global stats
+            if (data.analytics) {
+                statsDiv.innerHTML = `
+                    <div>📊 Total Players: ${data.analytics.totalPlayers} | 
+                    🎮 Games Played: ${data.analytics.totalGames} | 
+                    🏆 High Score: ${data.analytics.highestScore}</div>
+                `;
+            }
             
             if (data && data.scores && data.scores.length > 0) {
-                leaderboardDiv.innerHTML = '<h2>🏆 Leaderboard 🏆</h2>';
+                leaderboardDiv.innerHTML = '<h2>🏆 Global Leaderboard 🏆</h2>';
                 data.scores.forEach((entry, index) => {
                     const div = document.createElement('div');
-                    div.className = 'leaderboard-entry';
-                    div.textContent = `${index + 1}. ${entry.player}: ${entry.score}`;
+                    div.className = 'leaderboard-entry' + (index < 3 ? ' top3' : '');
+                    const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '';
+                    const date = new Date(entry.timestamp).toLocaleDateString();
+                    div.innerHTML = `
+                        <span>${medal} ${index + 1}. ${entry.player}</span>
+                        <span>${entry.score} pts</span>
+                    `;
                     leaderboardDiv.appendChild(div);
                 });
             } else {
-                leaderboardDiv.innerHTML = '<h2>🏆 Leaderboard 🏆</h2><p>No scores yet. Be the first!</p>';
+                leaderboardDiv.innerHTML = '<h2>🏆 Global Leaderboard 🏆</h2><p>No scores yet. Be the first!</p>';
             }
         }
 
